@@ -1,27 +1,42 @@
 version: '3.8'
+
 # ================================================================
-# VulnCorp — Machine 3: dmz-ftp01
-# DEPLOY: git clone <repo> && cd dmz-ftp01 && sudo ./deploy.sh
-# ACCESS: ftp <VM_IP> 21 (anonymous login)
-#         ftp <VM_IP> 2121 (ProFTPD mod_copy)
-# ⚠️  FOR EDUCATIONAL / LAB USE ONLY
+# VulnCorp — Machine 3: dmz-ftp01 (FTP Server)
 # ================================================================
+# WHAT IS THIS FILE?
+#   Docker Compose tells Docker HOW to run the container.
+#   It maps ports from the container to your host machine
+#   so you can access the services from outside.
+#
+# DEPLOY:
+#   cd machines/dmz-ftp01 && sudo ./deploy.sh
+#
+# ACCESS:
+#   FTP:     ftp <VM_IP> 21     (anonymous login, no password)
+#   ProFTPD: telnet <VM_IP> 2121 (SITE CPFR/CPTO mod_copy RCE)
+#   Web:     http://<VM_IP>     (Apache — mod_copy target)
+#   SSH:     ssh ftpuser@<VM_IP> -p 2222  (password: ftp123)
+#
+# ⚠️  FOR EDUCATIONAL / LAB USE ONLY — NEVER EXPOSE TO INTERNET
+# ================================================================
+
 services:
   dmz-ftp01:
     build: .
     container_name: vulncorp-ftp01
     hostname: vulncorp-ftp01
     ports:
-      - "0.0.0.0:21:21"
-      - "0.0.0.0:2121:2121"
-      - "0.0.0.0:22:22"
-      - "0.0.0.0:80:80"
-      - "0.0.0.0:40000-40100:40000-40100"
+      - "0.0.0.0:21:21"              # vsftpd — Anonymous FTP (the main vuln)
+      - "0.0.0.0:2121:2121"          # ProFTPD — mod_copy RCE (CVE-2015-3306)
+      - "0.0.0.0:2222:22"            # SSH (on 2222 to avoid conflict with host)
+      - "0.0.0.0:80:80"              # Apache — web server (mod_copy writes here)
+      - "0.0.0.0:40000-40100:40000-40100"  # FTP passive mode data ports
     cap_add:
-      - SYS_PTRACE
+      - SYS_PTRACE                   # Allows debugging tools inside container
     security_opt:
-      - seccomp:unconfined
+      - seccomp:unconfined            # Needed for FTP passive mode to work
     restart: unless-stopped
     environment:
       - VULNCORP_ENV=lab
-      - MACHINE_IP=10.10.10.30
+      - MACHINE_IP=10.10.10.30       # This machine's IP in the lab network
+      - NEXT_MACHINE_IP=172.16.0.10  # Hint: next target is the database server

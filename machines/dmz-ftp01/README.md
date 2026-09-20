@@ -32,7 +32,7 @@ docker compose up -d --build
 | **vsftpd** | `21` | vsftpd 2.3.4 banner | **Anonymous Write Enabled** (`anon_upload_enable=YES`) |
 | **ProFTPD** | `2121` | ProFTPD Standalone | **`mod_copy` RCE** (`SITE CPFR` / `SITE CPTO`) |
 | **HTTP** | `80` | Apache Web Server | Web root can be written to via ProFTPD mod_copy |
-| **SSH** | `22` | OpenSSH | Root login allowed |
+| **SSH** | `2222` | OpenSSH | Root login allowed |
 | **FTP Passive** | `40000-40100` | Passive data ports | Data transfer |
 
 ---

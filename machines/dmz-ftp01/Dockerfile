@@ -6,31 +6,69 @@ LABEL machine="3"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# ================================================================
+# WHAT THIS INSTALLS:
+#   vsftpd       → FTP server with anonymous login enabled
+#   proftpd      → Second FTP server with mod_copy bug (CVE-2015-3306)
+#   apache2 + php → Web server so mod_copy attack can execute PHP scripts
+#   openssh-server → SSH remote access
+#   cron         → Task scheduler (used for a privilege escalation trick)
+#   gcc/make     → To compile a vulnerable SUID binary (another priv-esc)
+# ================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     vsftpd \
     proftpd \
     apache2 \
+    libapache2-mod-php \
+    php \
     openssh-server \
+    cron \
     python3 \
-    curl wget net-tools vim sudo ftp \
+    gcc \
+    make \
+    curl wget net-tools vim sudo ftp telnet procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Create FTP user
+# ================================================================
+# CREATE USERS — These are intentionally weak passwords (on purpose!)
+#   root:toor         → Classic weak root password
+#   ftpuser:ftp123    → FTP user with a guessable password
+#   labadmin:labadmin123 → Lab admin account (matches Debian install)
+# ================================================================
+RUN echo "root:toor" | chpasswd
 RUN useradd -m -s /bin/bash ftpuser && echo "ftpuser:ftp123" | chpasswd
+RUN useradd -m -s /bin/bash labadmin && echo "labadmin:labadmin123" | chpasswd \
+    && usermod -aG sudo labadmin
 
-# Directories for FTP pub
+# Create FTP pub directory (world-writable so anyone can upload — that's the vuln!)
 RUN mkdir -p /var/ftp/pub/keys && chmod -R 777 /var/ftp
 
-# Copy setup scripts
+# Create Apache webroot (this is where mod_copy will write files to)
+RUN mkdir -p /var/www/html && chown -R www-data:www-data /var/www/html
+
+# Copy all setup scripts into the container
 COPY setup/ /opt/setup/
 COPY entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /opt/setup/*.sh /entrypoint.sh
+
+# Run setup scripts during build:
+#   setup_ftp.sh        → Configures vsftpd, ProFTPD, Apache, SSH
+#   setup_breadcrumbs.sh → Plants sensitive files, flags, and clues
 RUN /opt/setup/setup_ftp.sh
 RUN /opt/setup/setup_breadcrumbs.sh
 
+# Generate SSH host keys
 RUN mkdir -p /var/run/sshd && ssh-keygen -A
 
+# ================================================================
+# EXPOSED PORTS:
+#   21         → vsftpd (anonymous FTP)
+#   2121       → ProFTPD (mod_copy vulnerability)
+#   22         → SSH
+#   80         → Apache web server
+#   40000-40100 → FTP passive data transfer ports
+# ================================================================
 EXPOSE 21 22 80 2121 40000-40100
 
 ENTRYPOINT ["/entrypoint.sh"]
