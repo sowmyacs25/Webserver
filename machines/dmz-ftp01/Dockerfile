@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   cron         → Task scheduler
 #   gcc/make     → Development tools
 # ================================================================
-# 1. Install vsftpd, web services, SSH, and dependencies
+# 1. Install vsftpd, web services, SSH, and ProFTPD runtime libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     vsftpd \
     apache2 \
@@ -27,16 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     make \
     curl wget net-tools vim sudo ftp telnet procps \
-    libcap2 libssl3 libpam0g ucf
+    libcap2 libssl3 libpam0g ucf \
+    libhiredis0.14 libmemcached11 libmemcachedutil2 libncursesw6 libidn2-0 libacl1 netbase
 
-# 2. Download ProFTPD, strip Debian virtual package conflict, and install cleanly
+# 2. Extract ProFTPD core binaries & modules without APT virtual package conflicts
 RUN cd /tmp && \
-    apt-get download proftpd-core proftpd-basic && \
-    dpkg-deb -R proftpd-core_*.deb /tmp/proftpd-core && \
-    sed -i '/^Conflicts:.*ftp-server/d' /tmp/proftpd-core/DEBIAN/control && \
-    sed -i '/^Provides:.*ftp-server/d' /tmp/proftpd-core/DEBIAN/control && \
-    dpkg-deb -b /tmp/proftpd-core /tmp/proftpd-core-fixed.deb && \
-    dpkg -i /tmp/proftpd-core-fixed.deb /tmp/proftpd-basic_*.deb && \
+    apt-get download proftpd-core && \
+    dpkg-deb -x proftpd-core_*.deb / && \
+    useradd -r -s /bin/false -d /run/proftpd proftpd 2>/dev/null || true && \
+    mkdir -p /run/proftpd /var/run/proftpd && \
     rm -rf /tmp/proftpd* /var/lib/apt/lists/*
 
 # ================================================================
