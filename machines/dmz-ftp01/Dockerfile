@@ -8,6 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ------------------------------------------------------------------
 # STEP 1: Install everything EXCEPT vsftpd and proftpd-core
+#         (includes the runtime libs proftpd-core needs)
 # ------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         apache2 \
@@ -21,6 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         curl wget net-tools vim sudo ftp telnet procps \
         ca-certificates \
+        libhiredis0.14 \
+        libmemcached11 \
+        libmemcachedutil2 \
+        libncursesw6 \
+        libidn2-0 \
+        libacl1 \
+        netbase \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------
