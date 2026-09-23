@@ -17,7 +17,7 @@
 #   - 3 CTF flags (VULN{...} strings = proof you found the vuln)
 # ================================================================
 set -e
-
+mkdir -p /var/ftp/pub/keys
 echo "[+] Planting sensitive files in FTP pub..."
 
 # ──────────────────────────────────────────────────────────────────

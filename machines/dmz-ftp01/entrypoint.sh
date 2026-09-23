@@ -2,87 +2,72 @@
 # ================================================================
 # VulnCorp Lab — dmz-ftp01 Entrypoint
 # ================================================================
-# WHAT IS THIS?
-#   This script runs every time the container starts.
-#   It starts all the vulnerable services one by one.
-#   Think of it as the "power on" sequence for this fake server.
-# ================================================================
 
 echo "============================================="
 echo "  VulnCorp FTP Server (dmz-ftp01)            "
 echo "  Machine 3 | DMZ Zone | 10.10.10.30         "
 echo "============================================="
 
-# Clean up stale PID files from previous runs
-# (Without this, services crash when you restart the container)
+# Clean stale PID files
 rm -f /var/run/vsftpd/vsftpd.pid \
-      /var/run/proftpd.pid \
+      /var/run/proftpd/proftpd.pid \
+      /run/proftpd/proftpd.pid \
       /var/run/apache2/apache2.pid \
       /var/run/sshd.pid \
       /var/run/crond.pid 2>/dev/null || true
 
-# --- Start SSH (remote login) ---
+mkdir -p /var/run/vsftpd/empty /var/run/sshd /run/proftpd
+
+# --- SSH ---
 echo "[*] Starting SSH..."
-service ssh start || /usr/sbin/sshd
+/usr/sbin/sshd
 
-# --- Start vsftpd (the FTP server with anonymous write) ---
+# --- vsftpd ---
 echo "[*] Starting vsftpd (Anonymous Write enabled)..."
-# vsftpd needs its run directory
-mkdir -p /var/run/vsftpd/empty
-service vsftpd start || /usr/sbin/vsftpd /etc/vsftpd.conf &
+/usr/sbin/vsftpd /etc/vsftpd.conf &
 
-# --- Start ProFTPD (the FTP server with mod_copy bug) ---
+# --- ProFTPD ---
 echo "[*] Starting ProFTPD (mod_copy / CVE-2015-3306)..."
-service proftpd start || /usr/sbin/proftpd
+/usr/sbin/proftpd -c /etc/proftpd/proftpd.conf
 
-# --- Start Apache (web server — target for mod_copy file writes) ---
+# --- Apache ---
 echo "[*] Starting Apache + PHP..."
-service apache2 start || /usr/sbin/apachectl start
+/usr/sbin/apachectl start
 
-# --- Start Cron (task scheduler — used for privilege escalation) ---
-echo "[*] Starting Cron daemon..."
-service cron start || /usr/sbin/cron
+# --- Cron ---
+echo "[*] Starting Cron..."
+/usr/sbin/cron
+
+sleep 1
 
 echo ""
 echo "============================================="
 echo "  dmz-ftp01 — All Services Running!          "
 echo "============================================="
-
-# Quick checks to confirm services are actually listening
 echo ""
-if ss -tlpn 2>/dev/null | grep -q ':21 '; then
-    echo "[+] vsftpd:   Port 21   — LISTENING (Anon FTP Write)"
-else
-    echo "[!] vsftpd:   Port 21   — WARNING: may not be running"
-fi
 
-if ss -tlpn 2>/dev/null | grep -q ':2121 '; then
-    echo "[+] ProFTPD:  Port 2121 — LISTENING (mod_copy RCE)"
-else
-    echo "[!] ProFTPD:  Port 2121 — WARNING: may not be running"
-fi
+check_port() {
+    local port=$1 name=$2
+    if ss -tlnp 2>/dev/null | grep -q ":$port "; then
+        echo "[+] $name: Port $port — LISTENING"
+    else
+        echo "[!] $name: Port $port — WARNING: may not be running"
+    fi
+}
 
-if ss -tlpn 2>/dev/null | grep -q ':80 '; then
-    echo "[+] Apache:   Port 80   — LISTENING (PHP webshell target)"
-else
-    echo "[!] Apache:   Port 80   — WARNING: may not be running"
-fi
-
-if ss -tlpn 2>/dev/null | grep -q ':22 '; then
-    echo "[+] SSH:      Port 22   — LISTENING (mapped to 2222 on host)"
-else
-    echo "[!] SSH:      Port 22   — WARNING: may not be running"
-fi
+check_port 21   "vsftpd  (Anon FTP Write)"
+check_port 2121 "ProFTPD (mod_copy RCE) "
+check_port 80   "Apache  (PHP webshell)"
+check_port 22   "SSH                     "
 
 echo ""
 echo "  Quick Access:"
-echo "    FTP:     ftp localhost 21     (user: anonymous)"
-echo "    ProFTPD: telnet localhost 2121 (SITE CPFR/CPTO)"
-echo "    Web:     http://localhost      (mod_copy target)"
-echo "    SSH:     ssh ftpuser@localhost -p 2222  (pw: ftp123)"
+echo "    FTP:     ftp <VM_IP> 21         (user: anonymous)"
+echo "    ProFTPD: telnet <VM_IP> 2121    (SITE CPFR/CPTO)"
+echo "    Web:     http://<VM_IP>         (mod_copy target)"
+echo "    SSH:     ssh ftpuser@<VM_IP> -p 2222  (pw: ftp123)"
 echo ""
-echo "  ⚠️  FOR EDUCATIONAL USE ONLY"
+echo "  WARNING: FOR EDUCATIONAL USE ONLY"
 echo "============================================="
 
-# Keep container running (without this, Docker would exit immediately)
 tail -f /dev/null
