@@ -7,8 +7,7 @@ LABEL machine="3"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ------------------------------------------------------------------
-# STEP 1: Install everything EXCEPT vsftpd and proftpd-core
-#         (includes the runtime libs proftpd-core needs)
+# STEP 1: Base tooling + Apache/PHP + SSH + common libs
 # ------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         apache2 \
@@ -22,33 +21,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         curl wget net-tools vim sudo ftp telnet procps \
         ca-certificates \
+        libpcre2-posix3 \
         libhiredis0.14 \
         libmemcached11 \
         libmemcachedutil2 \
         libncursesw6 \
         libidn2-0 \
         libacl1 \
+        libcap2 \
+        libssl3 \
+        libpam0g \
         netbase \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------
-# STEP 2: Install vsftpd
+# STEP 2: vsftpd
 # ------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends vsftpd \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------
-# STEP 3: Force-install proftpd-core alongside vsftpd
-#         (apt refuses normally because both claim "ftp-server")
+# STEP 3: proftpd-core — install .deb, then let apt fix any missing deps
 # ------------------------------------------------------------------
 RUN apt-get update \
     && apt-get download proftpd-core \
     && dpkg --force-conflicts --force-overwrite -i proftpd-core_*.deb \
+    && apt-get install -y -f --no-install-recommends \
     && rm -f proftpd-core_*.deb \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------
-# Create users (intentionally weak passwords)
+# Create users
 # ------------------------------------------------------------------
 RUN echo "root:toor" | chpasswd \
  && useradd -m -s /bin/bash ftpuser && echo "ftpuser:ftp123" | chpasswd \
@@ -56,7 +59,7 @@ RUN echo "root:toor" | chpasswd \
  && usermod -aG sudo labadmin
 
 # ------------------------------------------------------------------
-# Prepare runtime directories
+# Runtime directories
 # ------------------------------------------------------------------
 RUN mkdir -p /var/ftp/pub/keys \
              /var/www/html \
@@ -67,20 +70,17 @@ RUN mkdir -p /var/ftp/pub/keys \
  && chown -R www-data:www-data /var/www/html
 
 # ------------------------------------------------------------------
-# Copy setup scripts
+# Copy and run setup scripts
 # ------------------------------------------------------------------
 COPY setup/ /opt/setup/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /opt/setup/*.sh /entrypoint.sh
 
-# ------------------------------------------------------------------
-# Run setup scripts during build
-# ------------------------------------------------------------------
 RUN /opt/setup/setup_ftp.sh \
  && /opt/setup/setup_breadcrumbs.sh
 
 # ------------------------------------------------------------------
-# Generate SSH host keys
+# SSH host keys
 # ------------------------------------------------------------------
 RUN ssh-keygen -A
 
