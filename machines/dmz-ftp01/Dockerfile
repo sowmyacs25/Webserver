@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         curl wget net-tools vim sudo ftp telnet procps \
         ca-certificates \
+        iproute2 \
         libpcre2-posix3 \
         libhiredis0.14 \
         libmemcached11 \
@@ -37,10 +38,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends vsftpd \
     && rm -rf /var/lib/apt/lists/*
 
 # STEP 3: proftpd-core
-#   - download the .deb
-#   - dpkg -i with force flags (registers, may partially fail)
-#   - apt-get install -f (fixes deps)
-#   - dpkg -i AGAIN (now that deps are there, files actually install)
 RUN apt-get update \
     && apt-get download proftpd-core \
     && dpkg --force-conflicts --force-overwrite -i proftpd-core_*.deb || true \
