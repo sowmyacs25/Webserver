@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends vsftpd \
 
 # STEP 3: Build ProFTPD 1.3.5 from source (VULNERABLE to CVE-2015-3306)
 RUN cd /tmp \
-    && curl -fsSL https://github.com/proftpd/proftpd/archive/refs/tags/v1.3.5.tar.gz -o proftpd.tar.gz \
+    && curl -fsSL "https://sourceforge.net/projects/proftpd/files/ProFTPD%20Source%20Distributions/1.3.5/proftpd-1.3.5.tar.gz/download" -o proftpd.tar.gz \
     && tar -xzf proftpd.tar.gz \
     && cd proftpd-1.3.5 \
     && ./configure --prefix=/usr \
