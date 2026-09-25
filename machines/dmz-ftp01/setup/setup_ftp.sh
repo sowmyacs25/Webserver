@@ -43,10 +43,14 @@ pam_service_name=vsftpd
 seccomp_sandbox=NO
 EOF
 
+# vsftpd refuses to serve anonymous if its root is world-writable.
+# Fix: make /var/ftp non-writable, keep /var/ftp/pub writable for uploads.
+chmod 755 /var/ftp
+chmod -R 777 /var/ftp/pub
+
 # ------------------------------------------------------------------
 # 2. PROFTPD — mod_copy (CVE-2015-3306)
-#    On Debian bookworm, mod_copy is compiled INTO the proftpd binary.
-#    We just need to make sure the module is available and allowed.
+#    Debian ships mod_copy.so; we just need to LOAD it explicitly.
 # ------------------------------------------------------------------
 echo "[+] Configuring ProFTPD (mod_copy)..."
 mkdir -p /etc/proftpd/conf.d
@@ -60,10 +64,8 @@ UseIPv6 off
 RequireValidShell off
 UseFtpUsers off
 
-# mod_copy: on Debian this is built-in. No LoadModule line needed.
-# If the module file exists, loading it is harmless:
-<IfModule mod_copy.c>
-</IfModule>
+# ─── THE VULNERABILITY: load mod_copy (enables SITE CPFR / SITE CPTO) ───
+LoadModule mod_copy.c
 
 <Anonymous /var/ftp>
   User ftp
