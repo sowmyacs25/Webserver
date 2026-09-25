@@ -49,11 +49,13 @@ chmod 755 /var/ftp
 chmod -R 777 /var/ftp/pub
 
 # ------------------------------------------------------------------
-# 2. PROFTPD — mod_copy (CVE-2015-3306)
-#    Debian ships mod_copy.so; we just need to LOAD it explicitly.
+# 2. PROFTPD — mod_copy (CVE-2015-3306) built from source
 # ------------------------------------------------------------------
 echo "[+] Configuring ProFTPD (mod_copy)..."
-mkdir -p /etc/proftpd/conf.d
+
+mkdir -p /etc/proftpd /run/proftpd /var/run/proftpd
+chown -R nobody:nogroup /run/proftpd /var/run/proftpd 2>/dev/null || true
+
 cat > /etc/proftpd/proftpd.conf << 'EOF'
 ServerName "VulnCorp ProFTPD"
 ServerType standalone
@@ -61,11 +63,15 @@ DefaultServer on
 Port 2121
 UseIPv6 off
 
+# Run as root so mod_copy can write anywhere (needed for the CVE)
+User root
+Group root
+
 RequireValidShell off
 UseFtpUsers off
 
-# ─── THE VULNERABILITY: load mod_copy (enables SITE CPFR / SITE CPTO) ───
-LoadModule mod_copy.c
+# Disable any default auth restrictions
+AuthOrder mod_auth_unix.c
 
 <Anonymous /var/ftp>
   User ftp

@@ -6,7 +6,7 @@ LABEL machine="3"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# STEP 1: Base tooling + Apache/PHP + SSH + every proftpd-core dependency
+# STEP 1: Base tooling + Apache/PHP + SSH + build deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
         apache2 \
         libapache2-mod-php \
@@ -21,29 +21,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         iproute2 \
         libpcre2-posix3 \
+        libpcre2-dev \
         libhiredis0.14 \
+        libhiredis-dev \
         libmemcached11 \
         libmemcachedutil2 \
+        libmemcached-dev \
         libncursesw6 \
+        libncurses-dev \
         libidn2-0 \
+        libidn2-dev \
         libacl1 \
+        libacl1-dev \
         libcap2 \
+        libcap-dev \
         libssl3 \
+        libssl-dev \
         libpam0g \
+        libpam0g-dev \
         netbase \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # STEP 2: vsftpd
 RUN apt-get update && apt-get install -y --no-install-recommends vsftpd \
     && rm -rf /var/lib/apt/lists/*
 
-# STEP 3: proftpd-core
-RUN apt-get update \
-    && apt-get download proftpd-core \
-    && dpkg --force-conflicts --force-overwrite -i proftpd-core_*.deb || true \
-    && apt-get install -y -f --no-install-recommends \
-    && dpkg --force-conflicts --force-overwrite -i proftpd-core_*.deb \
-    && rm -f proftpd-core_*.deb \
+# STEP 3: Build ProFTPD 1.3.5 from source (VULNERABLE to CVE-2015-3306)
+RUN cd /tmp \
+    && curl -fsSL https://github.com/proftpd/proftpd/archive/refs/tags/v1.3.5.tar.gz -o proftpd.tar.gz \
+    && tar -xzf proftpd.tar.gz \
+    && cd proftpd-1.3.5 \
+    && ./configure --prefix=/usr \
+                   --sysconfdir=/etc/proftpd \
+                   --localstatedir=/var \
+                   --enable-dso \
+                   --with-modules=mod_copy \
+    && make \
+    && make install \
+    && rm -rf /tmp/proftpd* \
     && rm -rf /var/lib/apt/lists/*
 
 # Users
@@ -59,6 +75,7 @@ RUN mkdir -p /var/ftp/pub/keys \
              /var/run/vsftpd/empty \
              /var/run/sshd \
  && chmod -R 777 /var/ftp \
+ && chmod 777 /var/www/html \
  && chown -R www-data:www-data /var/www/html
 
 # Setup scripts
