@@ -1,0 +1,47 @@
+version: '3.8'
+
+# ================================================================
+# VulnCorp — Machine 7: int-dc01 (Domain Controller)
+# ================================================================
+# WHAT IS THIS FILE?
+#   Docker Compose runs the containerized Samba 4 Active Directory
+#   Domain Controller with AS-REP Roasting, Kerberoasting, DCSync,
+#   GPP cPassword, SMB Signing disabled, and all 7 CTF flags.
+#
+# DEPLOY:
+#   cd machines/int-dc01 && sudo ./deploy.sh
+#
+# ⚠️  FOR EDUCATIONAL / LAB USE ONLY — NEVER EXPOSE TO INTERNET
+# ================================================================
+
+services:
+  int-dc01:
+    build: .
+    container_name: vulncorp-dc01
+    hostname: VULNCORP-DC01
+    ports:
+      - "0.0.0.0:53:53/tcp"         # DNS
+      - "0.0.0.0:53:53/udp"         # DNS
+      - "0.0.0.0:88:88/tcp"         # Kerberos KDC
+      - "0.0.0.0:88:88/udp"         # Kerberos KDC
+      - "0.0.0.0:135:135"           # MSRPC Endpoint Mapper
+      - "0.0.0.0:139:139"           # NetBIOS Session Service
+      - "0.0.0.0:389:389/tcp"       # Active Directory LDAP
+      - "0.0.0.0:389:389/udp"       # Active Directory LDAP
+      - "0.0.0.0:445:445"           # SMB (NTLM Relay / GPP access)
+      - "0.0.0.0:464:464/tcp"       # Kerberos kpasswd
+      - "0.0.0.0:464:464/udp"       # Kerberos kpasswd
+      - "0.0.0.0:636:636"           # LDAPS (SSL)
+      - "0.0.0.0:3268:3268"         # Global Catalog LDAP
+      - "0.0.0.0:2222:22"           # SSH (mapped to 2222 to avoid host collision)
+    cap_add:
+      - SYS_PTRACE
+      - NET_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    restart: unless-stopped
+    environment:
+      - VULNCORP_ENV=lab
+      - MACHINE_IP=${MACHINE_IP:-192.168.1.10}
+      - DOMAIN_NAME=vulncorp.local
+      - DOMAIN_NETBIOS=VULNCORP
