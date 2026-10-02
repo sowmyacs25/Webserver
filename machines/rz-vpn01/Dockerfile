@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash vpnadmin && echo "vpnadmin:vpnadmin123" | chpasswd && \
     echo "vpnadmin ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-COPY app/ /opt/vpn_admin/
 COPY setup/ /opt/setup/
 COPY entrypoint.sh /entrypoint.sh
 

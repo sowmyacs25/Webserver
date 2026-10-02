@@ -4,6 +4,65 @@
 
 > 📝 **IP Note:** All IP addresses below are placeholders. Change `192.168.1.60` (this machine) and `192.168.1.10` (DC) to match your lab network layout before deploying.
 
+---
+
+## 📥 Download & Install Windows 10
+
+> **You need a real Windows 10/11 VM. This machine cannot fully emulate domain-join in Docker.**
+
+| Resource | URL |
+|----------|-----|
+| **Windows 10 Enterprise Evaluation ISO** (90-day free) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise |
+| **Windows 10 LTSC Evaluation** (alternative) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise-ltsc |
+| **VirtualBox** (recommended hypervisor) | https://www.virtualbox.org/wiki/Downloads |
+
+### VirtualBox VM Settings
+```
+Name:       VULNCORP-INT-WS01
+Type:       Microsoft Windows
+Version:    Windows 10 (64-bit)
+RAM:        2048 MB
+vCPUs:      2
+Disk:       40 GB (VDI, dynamically allocated)
+Network:    Adapter 1 → Host-Only → vboxnet2 (192.168.1.0/24)
+```
+
+### Static IP During Windows Setup
+After install, set:
+- IP Address:  `192.168.1.60`
+- Subnet Mask: `255.255.255.0`
+- Default Gateway: `192.168.1.1`
+- DNS Server: **Leave blank** — `deploy_ws.ps1` sets it to `192.168.1.10` (DC) automatically
+
+> 🔴 **CRITICAL: Deploy `int-dc01` FIRST!** The domain `vulncorp.local` must exist before this machine can join it. See `machines/int-dc01/README.md`.
+
+---
+
+## 🔗 Connection to int-dc01 (Domain Controller)
+
+This workstation **depends on** and **connects to** `int-dc01` (`192.168.1.10`).
+
+| Protocol | Port | Purpose | Script Line |
+|----------|------|---------|-------------|
+| DNS | 53 | Resolves `vulncorp.local` → points to DC | `deploy_ws.ps1` L26 |
+| Kerberos | 88 | Ticket-Granting for domain auth | Automatic after domain join |
+| LDAP | 389 | AD queries | Automatic |
+| SMB | 445 | NETLOGON / SYSVOL / share access | Automatic |
+| RDP | 3389 | Remote Desktop (Domain Admin access) | Both machines |
+
+**How it connects (from `deploy_ws.ps1`):**
+```powershell
+# 1. DNS points to DC
+Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses "192.168.1.10"
+
+# 2. Domain join using DC admin credentials
+Add-Computer -DomainName "vulncorp.local" \
+  -Credential (New-Object PSCredential("VULNCORP\Administrator", (ConvertTo-SecureString "Corp@Admin2024" -AsPlainText -Force))) \
+  -OUPath "OU=VulnCorp Users,DC=vulncorp,DC=local" -Force
+```
+
+---
+
 ## Overview
 
 A domain-joined Windows 10 workstation in the **Internal Zone (`192.168.1.60`)** with multiple vulnerabilities typical of an enterprise endpoint. This machine connects to the **Domain Controller** (`int-dc01` at `192.168.1.10`) and provides attackers a foothold for AD-based attacks and lateral movement.

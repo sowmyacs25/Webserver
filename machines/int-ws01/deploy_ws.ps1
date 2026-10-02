@@ -18,25 +18,73 @@ Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host "  VulnCorp Workstation (int-ws01) Deploy     " -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
-# ── Step 1: Join Domain (if not already joined) ──────────────────
-$currentDomain = (Get-WmiObject Win32_ComputerSystem).Domain
-if ($currentDomain -ne $DomainName) {
-    Write-Host "[*] Setting DNS to Domain Controller ($DCIP)..." -ForegroundColor Yellow
-    $adapter = Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1
-    Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $DCIP
+# ── Step 0: Pre-flight Checks ────────────────────────────────────
+Write-Host "[*] Performing pre-flight checks..." -ForegroundColor Yellow
 
-    Write-Host "[*] Joining domain $DomainName..." -ForegroundColor Yellow
-    $secPass = ConvertTo-SecureString $DomainPassword -AsPlainText -Force
-    $cred = New-Object System.Management.Automation.PSCredential($DomainAdmin, $secPass)
-
-    Add-Computer -DomainName $DomainName -Credential $cred -OUPath "OU=VulnCorp Users,DC=vulncorp,DC=local" -Force
-
-    Write-Host "[!] Rebooting to complete domain join. Re-run this script after reboot." -ForegroundColor Green
-    Restart-Computer -Force
+# 1. Administrator Check
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "[-] Error: This script must be run as Administrator. Please open an elevated PowerShell prompt." -ForegroundColor Red
     Exit
 }
 
-Write-Host "[+] Already joined to domain: $currentDomain" -ForegroundColor Green
+# 2. Windows Edition Check
+$edition = (Get-ComputerInfo).WindowsProductName
+$isHomeEdition = ($edition -match "Home")
+if ($isHomeEdition) {
+    Write-Host "[!] Warning: Windows Home edition detected ($edition)." -ForegroundColor Yellow
+    Write-Host "[!] Active Directory Domain Join and RDP are not supported on Home edition. These steps will be skipped." -ForegroundColor Yellow
+    Write-Host "[!] The machine will be configured as a standalone workgroup computer." -ForegroundColor Yellow
+}
+
+# 3. Connectivity & DNS Check (Skip if Home edition, as we won't join the domain)
+if (-not $isHomeEdition) {
+    Write-Host "[*] Checking connectivity to Domain Controller ($DCIP)..." -ForegroundColor Yellow
+    if (-not (Test-Connection -ComputerName $DCIP -Count 1 -Quiet)) {
+        Write-Host "[-] Error: Cannot reach Domain Controller at $DCIP. Check network connectivity." -ForegroundColor Red
+        Exit
+    }
+
+    Write-Host "[*] Checking DNS resolution for $DomainName..." -ForegroundColor Yellow
+    try {
+        $dns = Resolve-DnsName -Name $DomainName -Server $DCIP -ErrorAction Stop
+        if (-not $dns) { throw "No records returned" }
+    } catch {
+        Write-Host "[-] Error: Cannot resolve $DomainName using DNS server $DCIP. Check AD DNS configuration." -ForegroundColor Red
+        Exit
+    }
+}
+
+Write-Host "[+] Pre-flight checks passed." -ForegroundColor Green
+
+# ── Step 1: Join Domain (if not already joined) ──────────────────
+if ($isHomeEdition) {
+    Write-Host "[!] Skipping Domain Join (Not supported on Windows Home)" -ForegroundColor Yellow
+} else {
+    $currentDomain = (Get-WmiObject Win32_ComputerSystem).Domain
+    if ($currentDomain -ne $DomainName) {
+        Write-Host "[*] Setting DNS to Domain Controller ($DCIP)..." -ForegroundColor Yellow
+        $adapter = Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $DCIP
+    
+        try {
+            Write-Host "[*] Joining domain $DomainName..." -ForegroundColor Yellow
+            $secPass = ConvertTo-SecureString $DomainPassword -AsPlainText -Force
+            $cred = New-Object System.Management.Automation.PSCredential($DomainAdmin, $secPass)
+        
+            Add-Computer -DomainName $DomainName -Credential $cred -OUPath "OU=VulnCorp Users,DC=vulncorp,DC=local" -Force -ErrorAction Stop
+        
+            Write-Host "[!] Rebooting to complete domain join. Re-run this script after reboot." -ForegroundColor Green
+            Restart-Computer -Force
+            Exit
+        } catch {
+            Write-Host "[-] Failed to join domain. Error: $_" -ForegroundColor Red
+            Write-Host "Press any key to exit without restarting..." -ForegroundColor Yellow
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            Exit
+        }
+    }
+    Write-Host "[+] Already joined to domain: $currentDomain" -ForegroundColor Green
+}
 
 # ── Step 2: Create Weak Local Admin ──────────────────────────────
 Write-Host "[*] Creating weak local admin account..." -ForegroundColor Yellow
@@ -88,11 +136,15 @@ Set-ItemProperty -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Na
 Write-Host "[+] AlwaysInstallElevated set in HKLM and HKCU" -ForegroundColor Green
 
 # ── Step 8: Enable RDP Without NLA ───────────────────────────────
-Write-Host "[*] Enabling RDP without NLA..." -ForegroundColor Yellow
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
-Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-Write-Host "[+] RDP enabled without NLA on port 3389" -ForegroundColor Green
+if ($isHomeEdition) {
+    Write-Host "[!] Skipping RDP Configuration (Not supported on Windows Home)" -ForegroundColor Yellow
+} else {
+    Write-Host "[*] Enabling RDP without NLA..." -ForegroundColor Yellow
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    Write-Host "[+] RDP enabled without NLA on port 3389" -ForegroundColor Green
+}
 
 # ── Step 9: Enable LLMNR and NetBIOS ─────────────────────────────
 Write-Host "[*] Ensuring LLMNR and NetBIOS are enabled (Responder vector)..." -ForegroundColor Yellow

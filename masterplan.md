@@ -73,11 +73,11 @@ Each zone has dedicated machines with realistic services, misconfigurations, sof
           │  │ 192.168.1.10 │  │ 192.168.1.20 │  │ 192.168.1.30 │            │
           │  │ AD/DNS/LDAP  │  │ ERP App/MSSQL│  │ GitLab/Jenkins│           │
           │  └──────────────┘  └──────────────┘  └──────────────┘            │
-          │  ┌──────────────┐  ┌──────────────┐                               │
-          │  │ int-files01  │  │ int-backup01 │                               │
-          │  │ 192.168.1.40 │  │ 192.168.1.50 │                               │
-          │  │ Samba/NFS    │  │ Rsync/Bacula │                               │
-          │  └──────────────┘  └──────────────┘                               │
+          │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
+          │  │ int-files01  │  │ int-backup01 │  │ int-ws01     │            │
+          │  │ 192.168.1.40 │  │ 192.168.1.50 │  │ 192.168.1.60 │            │
+          │  │ Samba/NFS    │  │ Rsync/Bacula │  │ Win10/AD WS  │            │
+          │  └──────────────┘  └──────────────┘  └──────────────┘            │
           └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -373,6 +373,45 @@ LDAP anonymous bind → Enumerate users/groups
 ```
 
 **Domain Flag (Ultimate CTF Win):** `VULN{d0m41n_4dm1n_3mp1r3_f3ll}`
+
+---
+
+### 💻 Machine 12: `int-ws01` (192.168.1.60) — Domain-Joined Windows 10 Workstation
+
+**OS:** Windows 10 Enterprise  
+**Hostname:** VULNCORP-WS01  
+**Services:** SMB (445/139), RDP (3389), Print Spooler, WinRM  
+**Domain:** `vulncorp.local` (joined to `int-dc01`)
+
+> 📥 **Download:** https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise
+
+#### Vulnerabilities
+
+| # | Vulnerability | Location | CWE | Severity | Flag |
+|---|--------------|----------|-----|----------|------|
+| WS1 | EternalBlue (SMBv1 enabled) | SMB service (port 445) | CVE-2017-0144 | 🔴 CRITICAL | `VULN{3t3rn4l_blu3_w0rkst4t10n}` |
+| WS2 | Stored plaintext credentials (Domain Admin) | `C:\Users\john.doe\Documents\` + SMB Public share | CWE-256 | 🟠 HIGH | `VULN{st0r3d_cr3ds_p1vot}` |
+| WS3 | PrintNightmare (Print Spooler running) | Windows Spooler service | CVE-2021-34527 | 🔴 CRITICAL | `VULN{pr1ntn1ghtm4r3_dc}` |
+| WS4 | Unquoted service path (VulnCorpMonitor) | `C:\Program Files\VulnCorp\Monitoring Agent\` | CWE-428 | 🟠 HIGH | — |
+| WS5 | AlwaysInstallElevated (MSI privesc) | HKLM + HKCU registry | CWE-269 | 🟠 HIGH | — |
+| WS6 | LLMNR / NetBIOS enabled (Responder vector) | Network stack | CWE-346 | 🟡 MEDIUM | — |
+| WS7 | Weak local admin password | `ws_admin` / `Desktop@2024` | CWE-521 | 🟠 HIGH | `VULN{w0rkst4t10n_4dm1n_pwn3d}` |
+| WS8 | RDP without NLA (port 3389) | Remote Desktop service | CWE-306 | 🟡 MEDIUM | — |
+
+**Connection to int-dc01:** This machine is domain-joined to `int-dc01` (`192.168.1.10`). DNS, Kerberos (port 88), LDAP (port 389), and SMB all route through the DC. Domain Admin credentials (`john.doe` / `Corp@Admin2024`) are planted on this workstation, creating a direct pivot path from WS01 → DC01.
+
+**Attack Path Summary:**
+```
+SMB guest access → \\192.168.1.60\Public\IT_Notes.txt → john.doe:Corp@Admin2024
+  OR
+EternalBlue (CVE-2017-0144) → SYSTEM on WS01 → Harvest stored credentials
+  OR
+LLMNR Poisoning (Responder) → NTLMv2 hash → Crack offline → Domain Admin
+→ int-dc01 RDP/SMB → AS-REP Roast / DCSync → Full Domain Compromise
+```
+
+**Deploy:** `machines/int-ws01/deploy_ws.ps1` (run as Administrator on Windows 10)  
+**Prerequisite:** `int-dc01` must be deployed and running first.
 
 ---
 
@@ -685,7 +724,8 @@ Backup cron writable → PrivEsc to root → SSH to all servers (password reuse)
 - [ ] `int-backup01` — Rsync + Bacula (Docker / Linux VM)
 - [ ] `int-files01` — Samba + NFS + SMBv1 (Docker / Linux VM)
 - [ ] `int-erp01` — Custom Flask ERP + PostgreSQL (Docker)
-- [ ] `int-dc01` — Active Directory (Windows Server VM — VirtualBox/VMware)
+- [ ] `int-dc01` — Active Directory (Windows Server 2019 VM — VirtualBox/VMware)
+- [ ] `int-ws01` — Domain-joined Workstation (Windows 10 Enterprise VM — VirtualBox/VMware)
 
 ### Phase 4 — Orchestration & Polish
 - [ ] Master `docker-compose.yml` with all Linux containers and custom networks
@@ -711,7 +751,8 @@ Backup cron writable → PrivEsc to root → SSH to all servers (password reuse)
 | int-backup01 | Rsync, Bacula, OpenSSH | Docker |
 | int-files01 | Samba 4 (SMBv1), NFS, vsftpd | Docker / Linux VM |
 | int-erp01 | Flask ERP, PostgreSQL/MSSQL | Docker / Windows VM |
-| int-dc01 | Windows Server 2019, Active Directory | Windows VM |
+| int-dc01 | Windows Server 2019, Active Directory | **Windows Server VM** |
+| int-ws01 | Windows 10 Enterprise, domain-joined | **Windows 10 VM** |
 | CTFd | CTFd scoreboard | Docker |
 | Firewalls | iptables routing containers | Docker |
 

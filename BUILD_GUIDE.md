@@ -30,7 +30,7 @@
 
 ---
 
-## 1. VM Overview — All 11 Machines
+## 1. VM Overview — All 12 Machines
 
 | # | VM Name | Hostname | Zone | OS | RAM | Disk | vCPUs | Static IP |
 |---|---------|----------|------|----|-----|------|-------|-----------|
@@ -45,11 +45,13 @@
 | 9 | int-dev01 | vulncorp-dev01 | Internal | **Ubuntu 24** | 3 GB | 40 GB | 2 | 192.168.1.30 |
 | 10 | int-files01 | VULNCORP-FILES01 | Internal | **Debian 13** | 1 GB | 20 GB | 1 | 192.168.1.40 |
 | 11 | int-backup01 | vulncorp-backup01 | Internal | **Debian 13** | 1 GB | 20 GB | 1 | 192.168.1.50 |
+| 12 | int-ws01 | VULNCORP-WS01 | Internal | **Windows 10 Enterprise** | 2 GB | 40 GB | 2 | 192.168.1.60 |
 
 **OS Summary:**
 - **Debian 13 VMs:** 6 — (web01, mail01, ftp01, monitor01, files01, backup01)
 - **Ubuntu 24 VMs:** 4 — (db01, vpn01, erp01, dev01)
 - **Windows Server 2019:** 1 — (dc01)
+- **Windows 10 Enterprise:** 1 — (ws01)
 
 **Host machine requirements (to run all 11 VMs):**
 
@@ -108,7 +110,9 @@ When creating each VM:
 |----|-----|----------|
 | Debian 13 (Bookworm) | https://www.debian.org/download | `debian-13.x-amd64-netinst.iso` |
 | Ubuntu 24.04 LTS Server | https://ubuntu.com/download/server | `ubuntu-24.04-live-server-amd64.iso` |
-| Windows Server 2019 Eval | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2019 | `WS2019_Eval.iso` |
+| **Windows Server 2019 Eval** (for int-dc01) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2019 | `WS2019_Eval.iso` (~5 GB, 180-day eval) |
+| **Windows 10 Enterprise Eval** (for int-ws01) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise | `Windows10_Enterprise_eval.iso` (~5 GB, 90-day eval) |
+| VirtualBox (hypervisor for both Windows VMs) | https://www.virtualbox.org/wiki/Downloads | `VirtualBox-7.x-Win.exe` |
 
 ### 3.2 Debian 13 Install Settings (applies to all 6 Debian VMs)
 
@@ -1421,6 +1425,178 @@ bloodhound-python -u svc_backup -p Backup@Svc2024 -d vulncorp.local -ns 192.168.
 
 ---
 
+## 10b. Machine 12 — int-ws01 (Domain-Joined Workstation)
+
+**OS:** Windows 10 Enterprise | **IP:** 192.168.1.60 | **Zone:** Internal  
+**VirtualBox:** RAM 2048 MB · vCPUs 2 · Disk 40 GB · Adapter 1: `vboxnet2`
+
+> ⚠️ **Deploy int-dc01 (section 10) FIRST.** The workstation joins `vulncorp.local` — the domain must exist before running this script.
+
+**Goal:** Domain-joined Windows 10 endpoint simulating a real enterprise workstation. Entry point for AD-based attacks (EternalBlue, Kerberoasting, lateral movement to DC).
+
+### 10b.1 Download Windows 10 ISO
+
+| Resource | URL |
+|----------|-----|
+| Windows 10 Enterprise Eval (90-day free) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise |
+| Windows 10 LTSC Eval (alternative) | https://www.microsoft.com/en-us/evalcenter/evaluate-windows-10-enterprise-ltsc |
+
+### 10b.2 Create the VM in VirtualBox
+
+```
+Name:    VULNCORP-INT-WS01
+Type:    Microsoft Windows
+Version: Windows 10 (64-bit)
+RAM:     2048 MB
+vCPUs:   2
+Disk:    40 GB (VDI, dynamically allocated)
+Network Adapter 1: Host-only → vboxnet2
+```
+
+Attach the Windows 10 Enterprise ISO and boot.
+
+### 10b.3 Install Windows 10
+
+In the Windows installer:
+1. Select **Windows 10 Enterprise**
+2. Complete installation — create local user `labadmin` (temporary, will join domain)
+3. After install, open **Control Panel → Network and Internet → Network Connections**
+4. Set static IP on the Ethernet adapter:
+   - IP Address: `192.168.1.60`
+   - Subnet Mask: `255.255.255.0`
+   - Default Gateway: `192.168.1.1`
+   - DNS: **Leave blank** (script sets DNS to DC automatically)
+
+### 10b.4 Deploy Vulnerabilities (PowerShell as Administrator)
+
+Copy `deploy_ws.ps1` to the VM (USB, shared folder, or network share).
+
+```powershell
+# Step 1: Allow script execution
+Set-ExecutionPolicy Bypass -Scope Process -Force
+
+# Step 2: Run deployment
+.\deploy_ws.ps1
+```
+
+The script will:
+1. Set DNS to `192.168.1.10` (int-dc01)
+2. Join domain `vulncorp.local` → **machine reboots**
+3. After reboot — run `deploy_ws.ps1` again to complete vulnerability setup
+
+### 10b.5 What deploy_ws.ps1 Configures (All Windows-Native Commands)
+
+```powershell
+# ── Domain Join ──────────────────────────────────────────────────────────────
+# Sets DNS to DC, joins domain vulncorp.local using VULNCORP\Administrator creds
+Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses "192.168.1.10"
+Add-Computer -DomainName "vulncorp.local" -Credential $cred `
+  -OUPath "OU=VulnCorp Users,DC=vulncorp,DC=local" -Force
+
+# ── Vulnerabilities Configured ───────────────────────────────────────────────
+# 1. EternalBlue: Enable SMBv1
+Enable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart
+Set-SmbServerConfiguration -EnableSMB1Protocol $true -Force
+
+# 2. Disable SMB Signing (NTLM Relay)
+Set-SmbServerConfiguration -RequireSecuritySignature $false -Force
+Set-SmbClientConfiguration -RequireSecuritySignature $false -Force
+
+# 3. PrintNightmare: Print Spooler running
+Set-Service -Name Spooler -StartupType Automatic; Start-Service Spooler
+
+# 4. Unquoted Service Path
+sc.exe create "VulnCorpMonitor" binPath= `
+  "C:\Program Files\VulnCorp\Monitoring Agent\monitor.exe" start= auto
+
+# 5. AlwaysInstallElevated (MSI privesc)
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" `
+  -Name "AlwaysInstallElevated" -Value 1 -Type DWord
+Set-ItemProperty -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer" `
+  -Name "AlwaysInstallElevated" -Value 1 -Type DWord
+
+# 6. RDP without NLA
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+  -Name "fDenyTSConnections" -Value 0
+Set-ItemProperty `
+  -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+  -Name "UserAuthentication" -Value 0
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+# 7. LLMNR / NetBIOS enabled
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" `
+  -Name "EnableMulticast" -ErrorAction SilentlyContinue
+
+# 8. Plant stored credentials, SMB share, flags
+# → C:\Users\john.doe\Documents\saved_passwords.txt (Domain Admin creds!)
+# → \\192.168.1.60\Public\IT_Notes.txt (DC password in plaintext)
+# → C:\flags\*.txt
+
+# 9. Disable Firewall & Defender (lab)
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+Set-MpPreference -DisableRealtimeMonitoring $true
+```
+
+### 10b.6 How int-ws01 Connects to int-dc01
+
+```
+int-ws01 (192.168.1.60)
+    │
+    ├─ DNS → 192.168.1.10 (DC resolves vulncorp.local)
+    ├─ Kerberos :88 → DC issues TGTs for domain auth
+    ├─ LDAP :389 → Group Policy, user info
+    ├─ SMB :445 → NETLOGON + SYSVOL shares
+    │
+    └─ ATTACK PATH:
+         john.doe:Corp@Admin2024 (stored on WS01) → DC RDP/SMB → Domain Admin
+         svc_backup:Backup@Svc2024 (stored on WS01) → DC DCSync → Full domain dump
+```
+
+### 10b.7 Verification Commands (from Kali)
+
+```bash
+# Confirm workstation is reachable
+nmap -p 445,3389,139 192.168.1.60
+
+# EternalBlue check
+nmap --script smb-vuln-ms17-010 192.168.1.60
+
+# List SMB shares (guest access)
+smbclient -L \\\\192.168.1.60 -N
+
+# Grab stored credentials
+smbclient \\\\192.168.1.60\\Public -N -c 'get IT_Notes.txt'
+
+# Confirm domain join (from DC PowerShell)
+Get-ADComputer -Filter {Name -eq "VULNCORP-WS01"}
+
+# Confirm workstation connectivity to DC (from WS01 PowerShell)
+nltest /sc_query:vulncorp.local
+```
+
+### 10b.8 Configured Vulnerabilities
+
+| # | Vulnerability | CVE / CWE | Severity |
+|---|---------------|-----------|----------|
+| 1 | EternalBlue (SMBv1) | CVE-2017-0144 | 🔴 Critical |
+| 2 | Stored plaintext credentials (john.doe) | CWE-256 | 🟠 High |
+| 3 | PrintNightmare (Print Spooler) | CVE-2021-34527 | 🔴 Critical |
+| 4 | Unquoted service path (VulnCorpMonitor) | CWE-428 | 🟠 High |
+| 5 | AlwaysInstallElevated (MSI privesc) | CWE-269 | 🟠 High |
+| 6 | LLMNR/NetBIOS poisoning | CWE-346 | 🟡 Medium |
+| 7 | Weak local admin (ws_admin/Desktop@2024) | CWE-521 | 🟠 High |
+| 8 | RDP without NLA | CWE-306 | 🟡 Medium |
+
+### 10b.9 Flags
+
+| Flag | Location |
+|------|----------|
+| `VULN{3t3rn4l_blu3_w0rkst4t10n}` | `C:\flags\eternalblue_flag.txt` |
+| `VULN{st0r3d_cr3ds_p1vot}` | `C:\flags\creds_flag.txt` |
+| `VULN{w0rkst4t10n_4dm1n_pwn3d}` | `C:\flags\admin_flag.txt` |
+
+---
+
 ## 11. Machine 8 — int-erp01 (ERP Server)
 
 **OS:** Ubuntu 24 | **IP:** 192.168.1.20 | **Zone:** Internal
@@ -2223,6 +2399,13 @@ curl -s http://192.168.1.20 > /dev/null && echo "[+] int-erp01 HTTP: OK" || echo
 curl -s http://192.168.1.30:2375/version > /dev/null && echo "[+] int-dev01 Docker API: OK (VULN ACTIVE)" || echo "[-] int-dev01 Docker API: FAIL"
 smbclient -L \\192.168.1.40 -N > /dev/null 2>&1 && echo "[+] int-files01 SMB: OK" || echo "[-] int-files01 SMB: FAIL"
 rsync rsync://192.168.1.50/ > /dev/null 2>&1 && echo "[+] int-backup01 Rsync: OK" || echo "[-] int-backup01 Rsync: FAIL"
+
+# Windows Machines (from Windows host or after pivot)
+# nc -z 192.168.1.10 445 && echo "[+] int-dc01 SMB: OK" || echo "[-] int-dc01 SMB: FAIL"
+# nc -z 192.168.1.10 3389 && echo "[+] int-dc01 RDP: OK" || echo "[-] int-dc01 RDP: FAIL"
+# nc -z 192.168.1.60 445 && echo "[+] int-ws01 SMB: OK" || echo "[-] int-ws01 SMB: FAIL"
+# nc -z 192.168.1.60 3389 && echo "[+] int-ws01 RDP: OK" || echo "[-] int-ws01 RDP: FAIL"
+# nmap --script smb-vuln-ms17-010 192.168.1.60    # EternalBlue check on WS01
 
 echo "=== Health Check Complete ==="
 ```
