@@ -118,6 +118,12 @@ EOF
 #      no password needed! This key belongs to "sysadmin".
 # ──────────────────────────────────────────────────────────────────
 ssh-keygen -t rsa -b 2048 -f /var/ftp/pub/keys/backup_rsa -N "" -C "sysadmin@vulncorp.local" -q
+chmod 644 /var/ftp/pub/keys/backup_rsa /var/ftp/pub/keys/backup_rsa.pub
+mkdir -p /home/sysadmin/.ssh
+cp /var/ftp/pub/keys/backup_rsa.pub /home/sysadmin/.ssh/authorized_keys
+chown -R sysadmin:sysadmin /home/sysadmin/.ssh 2>/dev/null || true
+chmod 700 /home/sysadmin/.ssh 2>/dev/null || true
+chmod 600 /home/sysadmin/.ssh/authorized_keys 2>/dev/null || true
 
 # ──────────────────────────────────────────────────────────────────
 # 5. HIDDEN MAINTENANCE NOTES — More credentials (hidden file)
@@ -165,11 +171,21 @@ echo "VULN{anon_ftp_wr1t3}" > /var/ftp/pub/flag1.txt
 # Flag 2: Found in the leaked SSH keys directory
 echo "VULN{ssh_k3y_l3ak3d}" > /var/ftp/pub/keys/flag.txt
 
-# Flag 3: Root flag — only readable after getting root access
+# Flag 3: ProFTPD mod_copy RCE Flag (readable once web shell / mod_copy exploited)
+echo "VULN{proftpd_rce_pwn3d}" > /var/www/flag.txt
+echo "VULN{proftpd_rce_pwn3d}" > /var/www/html/flag2.txt
+chown www-data:www-data /var/www/flag.txt /var/www/html/flag2.txt 2>/dev/null || true
+chmod 644 /var/www/flag.txt /var/www/html/flag2.txt 2>/dev/null || true
+
+# Flag 4: Root flag — only readable after getting root access
 echo "VULN{ftp_s3rv3r_r00t3d_m4ch1n3_3}" > /root/root.txt
 chmod 600 /root/root.txt  # Only root can read this
 
-# Set ownership so FTP anonymous user can read the pub files
-chown -R ftp:ftp /var/ftp 2>/dev/null || true
+# Set ownership: /var/ftp MUST be owned by root and 755 to prevent vsftpd refusing writable root!
+chown root:root /var/ftp
+chmod 755 /var/ftp
+chown -R ftp:ftp /var/ftp/pub 2>/dev/null || true
+chmod -R 777 /var/ftp/pub
+chmod 644 /var/ftp/pub/keys/backup_rsa /var/ftp/pub/keys/backup_rsa.pub
 
 echo "[+] FTP breadcrumbs planted!"

@@ -38,5 +38,6 @@ services:
     restart: unless-stopped
     environment:
       - VULNCORP_ENV=lab
-      - MACHINE_IP=10.10.10.30       # This machine's IP in the lab network
+      - MACHINE_IP=${MACHINE_IP:-10.10.10.30}       # This machine's IP in the lab network
+      - PASV_ADDRESS=${PASV_ADDRESS:-10.10.10.30}   # FTP passive mode advertised IP
       - NEXT_MACHINE_IP=172.16.0.10  # Hint: next target is the database server

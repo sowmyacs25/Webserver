@@ -17,11 +17,13 @@ anon_upload_enable=YES
 anon_mkdir_write_enable=YES
 anon_other_write_enable=YES
 write_enable=YES
+anon_umask=022
 
 local_enable=YES
 local_umask=022
 
 anon_root=/var/ftp
+allow_writeable_chroot=YES
 
 dirmessage_enable=YES
 xferlog_enable=YES
@@ -33,9 +35,10 @@ chroot_local_user=NO
 
 # Passive mode (Docker-friendly)
 pasv_enable=YES
+pasv_promiscuous=YES
 pasv_min_port=40000
 pasv_max_port=40100
-pasv_address=127.0.0.1
+pasv_address=10.10.10.30
 
 # Required for anonymous access under modern PAM
 secure_chroot_dir=/var/run/vsftpd/empty
@@ -43,9 +46,12 @@ pam_service_name=vsftpd
 seccomp_sandbox=NO
 EOF
 
-# vsftpd refuses to serve anonymous if its root is world-writable.
-# Fix: make /var/ftp non-writable, keep /var/ftp/pub writable for uploads.
+# vsftpd refuses to serve anonymous if its root is world-writable or owned by ftp.
+# Fix: make /var/ftp owned by root and 755, keep /var/ftp/pub owned by ftp and writable for uploads.
+chown root:root /var/ftp
 chmod 755 /var/ftp
+mkdir -p /var/ftp/pub
+chown -R ftp:ftp /var/ftp/pub
 chmod -R 777 /var/ftp/pub
 
 # ------------------------------------------------------------------
@@ -62,6 +68,8 @@ ServerType standalone
 DefaultServer on
 Port 2121
 UseIPv6 off
+WtmpLog off
+PassivePorts 40000 40100
 
 # Run as root so mod_copy can write anywhere (needed for the CVE)
 User root
@@ -91,7 +99,12 @@ id ftp >/dev/null 2>&1 || useradd -r -d /var/ftp -s /usr/sbin/nologin ftp
 # 3. APACHE + PHP
 # ------------------------------------------------------------------
 echo "[+] Configuring Apache..."
-a2enmod php* 2>/dev/null || true
+echo "ServerName localhost" >> /etc/apache2/apache2.conf
+for mod in /etc/apache2/mods-available/php*.load; do
+    if [ -f "$mod" ]; then
+        a2enmod "$(basename "$mod" .load)" 2>/dev/null || true
+    fi
+done
 chmod 777 /var/www/html
 
 cat > /var/www/html/index.html << 'HTMLEOF'
@@ -152,5 +165,11 @@ UsePAM yes
 AcceptEnv LANG LC_*
 Subsystem sftp /usr/lib/openssh/sftp-server
 EOF
+
+# ------------------------------------------------------------------
+# 5. SUID find — Privilege Escalation vector (GTFOBins)
+# ------------------------------------------------------------------
+echo "[+] Configuring SUID find for privesc..."
+chmod u+s /usr/bin/find
 
 echo "[+] FTP service setup complete!"

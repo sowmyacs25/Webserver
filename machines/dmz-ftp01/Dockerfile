@@ -52,18 +52,22 @@ RUN cd /tmp \
     && curl -fsSL https://gentoo.snt.utwente.nl/pub/software/proftpd/distrib/source/proftpd-1.3.5.tar.gz -o proftpd.tar.gz \
     && tar -xzf proftpd.tar.gz \
     && cd proftpd-1.3.5 \
+    && export CFLAGS="-fcommon" \
     && ./configure --prefix=/usr \
                    --sysconfdir=/etc/proftpd \
                    --localstatedir=/var \
-                   && make \
-                   && make install \
-                   && rm -rf /tmp/proftpd* \
-                   && rm -rf /var/lib/apt/lists/*
+                   --with-modules=mod_copy \
+    && make -j$(nproc) \
+    && make install \
+    && rm -rf /tmp/proftpd* \
+    && rm -rf /var/lib/apt/lists/*
 # Users
 RUN echo "root:toor" | chpasswd \
  && useradd -m -s /bin/bash ftpuser && echo "ftpuser:ftp123" | chpasswd \
  && useradd -m -s /bin/bash labadmin && echo "labadmin:labadmin123" | chpasswd \
- && usermod -aG sudo labadmin
+ && usermod -aG sudo labadmin \
+ && useradd -m -s /bin/bash sysadmin && echo "sysadmin:Sysadmin#99" | chpasswd \
+ && usermod -aG sudo sysadmin
 
 # Runtime dirs
 RUN mkdir -p /var/ftp/pub/keys \
