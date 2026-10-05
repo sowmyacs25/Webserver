@@ -43,8 +43,9 @@ RUN /opt/setup/setup_dc.sh \
 # Generate SSH host keys
 RUN mkdir -p /var/run/sshd && ssh-keygen -A
 
-# Expose standard Active Directory Domain Controller ports
-# 53: DNS | 88: Kerberos | 135: MSRPC | 139/445: SMB | 389/636: LDAP/S | 464: kpasswd | 3268: GC | 22: SSH
-EXPOSE 22 53 88 135 139 389 445 464 636 3268 3269
+# Expose standard AD DC ports
+# 22: SSH | 53: DNS | 88: Kerberos | 135: MSRPC | 139/445: SMB (v1+v2+v3) |
+# 389/636: LDAP/S | 464: kpasswd | 3268/3269: GC | 3389: RDP | 5985/5986: WinRM
+EXPOSE 22 53 88 135 139 389 445 464 636 3268 3269 3389 5985 5986
 
 ENTRYPOINT ["/entrypoint.sh"]

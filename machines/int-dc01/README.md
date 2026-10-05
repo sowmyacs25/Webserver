@@ -51,12 +51,15 @@ sudo ./deploy.sh
 |---------|------|-------------|---------------------|
 | **Kerberos KDC** | `88` (TCP/UDP) | RFC 4120 Authentication | AS-REP Roasting & Kerberoasting |
 | **Active Directory LDAP** | `389` / `636` | Directory Service | Anonymous / User LDAP enumeration & BloodHound |
-| **Microsoft SMB** | `445` / `139` | SYSVOL & Netlogon Shares | GPP cPassword leak & NTLM Relay (SMB signing disabled) |
+| **Microsoft SMB 2/3** | `445` | SMB 2.0 / 3.0 (Signing disabled) | GPP cPassword leak & NTLM Relay (CVE-2008-4037) |
+| **Microsoft SMBv1** | `445` / `139` | SMBv1 (NT1 protocol enabled) | EternalBlue-style enumeration (CVE-2017-0144 ref) |
 | **DNS Server** | `53` (TCP/UDP) | Active Directory Integrated DNS | Zone transfer & internal name resolution |
 | **MSRPC / Endpoint** | `135` | RPC Endpoint Mapper | DCSync DRSUAPI RPC & Remote Management |
 | **Kerberos Password** | `464` (TCP/UDP) | Kerberos kpasswd | Password change service |
 | **Global Catalog** | `3268` / `3269` | Forest Catalog LDAP | Forest-wide query enumeration |
-| **Remote Desktop (RDP)** | `3389` | Windows RDP | Open without Network Level Authentication (NLA) |
+| **Remote Desktop (RDP 10.0)** | `3389` | Windows RDP (no NLA) | Login without NLA; brute-force & pass-the-hash RDP |
+| **WinRM HTTP** | `5985` | Windows Remote Management | `evil-winrm` shell with NTLM auth (no TLS) |
+| **WinRM HTTPS** | `5986` | WinRM HTTPS (self-signed) | Remote PowerShell execution |
 | **SSH** | `2222` (host) | OpenSSH (container) | Administrative access (`john.doe` / `Corp@Admin2024`) |
 
 ---

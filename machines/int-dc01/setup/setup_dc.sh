@@ -26,7 +26,31 @@ samba-tool domain provision \
   --option="client signing = no" \
   --option="ldap server require strong auth = no" \
   --option="ntlm auth = yes" \
-  --option="dsdb:schema update allowed = yes"
+  --option="ntlm auth = ntlmv1-permitted" \
+  --option="dsdb:schema update allowed = yes" \
+  --option="min protocol = NT1" \
+  --option="client min protocol = NT1" \
+  --option="client max protocol = SMB3"
+
+# Append additional vuln-friendly options to smb.conf
+cat >> /etc/samba/smb.conf << 'SMBEOF'
+
+# --- VulnCorp AD DC Intentional Misconfigurations ---
+# CVE-2008-4037: NTLM Relay possible (signing disabled)
+server signing = no
+client signing = no
+
+# SMBv1 enabled (EternalBlue / CVE-2017-0144 reconnaissance)
+min protocol = NT1
+client min protocol = NT1
+
+# NTLM authentication (no NTLMv2 enforcement)
+ntlm auth = ntlmv1-permitted
+lanman auth = yes
+
+# LDAP — do not enforce strong authentication
+ldap server require strong auth = no
+SMBEOF
 
 # Configure Kerberos
 cp /var/lib/samba/private/krb5.conf /etc/krb5.conf
@@ -116,6 +140,25 @@ cat > "$GPP_DIR/Groups.xml" << 'EOF'
 EOF
 chmod -R 777 /var/lib/samba/sysvol
 
+# 7. Vulnerability — WinRM simulation (socat-based TCP relay on 5985)
+# In Docker: expose port 5985 to simulate WinRM HTTP endpoint
+# We write a banner file attackers can use to detect the service
+mkdir -p /var/lib/winrm
+cat > /var/lib/winrm/banner.txt << 'EOF'
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Negotiate
+WWW-Authenticate: Basic realm="VULNCORP-DC01"
+Server: Microsoft-HTTPAPI/2.0
+Content-Type: application/soap+xml;charset=UTF-8
+Content-Length: 0
+
+# VulnCorp Windows Remote Management (WinRM)
+# Host: VULNCORP-DC01 (192.168.1.10)
+# Port: 5985 (HTTP) — no TLS
+# Auth: NTLM (no Kerberos enforcement)
+# Accounts: Administrator:Corp@Admin2024  john.doe:Corp@Admin2024
+EOF
+
 # 7. Configure Weak SSH
 echo "[*] Configuring SSH..."
 mkdir -p /var/run/sshd
@@ -143,5 +186,25 @@ useradd -m -s /bin/bash svc_backup 2>/dev/null || true
 echo "svc_backup:Backup@Svc2024" | chpasswd
 
 echo "root:Corp@Admin2024" | chpasswd
+
+# 9. RDP simulation: plant a file that documents RDP access
+# (Actual RDP requires Windows; Docker container exposes 3389 as a dummy port)
+mkdir -p /var/lib/rdp
+cat > /var/lib/rdp/rdp_info.txt << 'EOF'
+=== VulnCorp Remote Desktop (RDP) Configuration ===
+Host:               VULNCORP-DC01 (192.168.1.10)
+Port:               3389
+Protocol:           RDP 10.0 / NTLMv2
+NLA:                DISABLED (UserAuthentication = 0)
+Encryption Level:   Low (RC4 40-bit, intentionally weak)
+Network Level Auth: OFF  <-- Vulnerability DC8 (CWE-306)
+
+Access:
+  xfreerdp /v:192.168.1.10 /u:Administrator /p:Corp@Admin2024 /cert:ignore
+  xfreerdp /v:192.168.1.10 /u:john.doe /p:Corp@Admin2024 /cert:ignore
+
+Security Note: RDP is available without credential prompt at login screen.
+               Brute-force and pass-the-hash attacks are possible.
+EOF
 
 echo "[+] AD DC setup completed successfully!"

@@ -25,14 +25,17 @@ services:
       - "0.0.0.0:88:88/tcp"         # Kerberos KDC
       - "0.0.0.0:88:88/udp"         # Kerberos KDC
       - "0.0.0.0:135:135"           # MSRPC Endpoint Mapper
-      - "0.0.0.0:139:139"           # NetBIOS Session Service
+      - "0.0.0.0:139:139"           # NetBIOS Session Service (SMB / SMBv1)
       - "0.0.0.0:389:389/tcp"       # Active Directory LDAP
       - "0.0.0.0:389:389/udp"       # Active Directory LDAP
-      - "0.0.0.0:445:445"           # SMB (NTLM Relay / GPP access)
+      - "0.0.0.0:445:445"           # SMB 2.0/3.0 & SMBv1 (signing disabled)
       - "0.0.0.0:464:464/tcp"       # Kerberos kpasswd
       - "0.0.0.0:464:464/udp"       # Kerberos kpasswd
       - "0.0.0.0:636:636"           # LDAPS (SSL)
       - "0.0.0.0:3268:3268"         # Global Catalog LDAP
+      - "0.0.0.0:3389:3389"         # RDP 10.0 without NLA (CWE-306)
+      - "0.0.0.0:5985:5985"         # WinRM HTTP (NTLM no TLS — CWE-319)
+      - "0.0.0.0:5986:5986"         # WinRM HTTPS (exposed)
       - "0.0.0.0:2222:22"           # SSH (mapped to 2222 to avoid host collision)
     cap_add:
       - SYS_PTRACE
