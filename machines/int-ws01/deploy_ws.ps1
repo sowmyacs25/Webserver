@@ -408,11 +408,11 @@ else {
         Write-Host "Attempting domain join..." -ForegroundColor Yellow
 
         Add-Computer `
-            -DomainName $DomainName `
-            -Server $DCIP `
-            -Credential $credential `
-            -Force `
-            -ErrorAction Stop
+    -DomainName $DomainName `
+    -Server "WIN-13GK71FE2P8.vulncorp.local" `
+    -Credential $credential `
+    -Force `
+    -ErrorAction Stop
 
         Write-Success "Domain join completed successfully."
 
