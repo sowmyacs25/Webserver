@@ -190,7 +190,7 @@ Write-Success "Network adapter detected."
 # STEP 4 - KEEP IP DHCP + SET DNS TO DC
 # ============================================================
 
-Write-Step "STEP 4 - Configuring DHCP IP and Domain Controller DNS"
+Write-Step "STEP 4 - Verifying DHCP IP and configuring Domain Controller DNS"
 
 Write-Host "The server IP will remain DHCP."
 Write-Host "DNS will be configured to:"
@@ -198,26 +198,60 @@ Write-Host "    $DCIP"
 
 try {
 
-    # Make sure IPv4 remains DHCP.
-    Set-NetIPInterface `
+    # Do not disturb a valid DHCP lease. Only repair DHCP if there is
+    # no usable IPv4 address or the machine has fallen back to APIPA.
+    $currentIPv4 = Get-NetIPAddress `
         -InterfaceIndex $adapter.ifIndex `
         -AddressFamily IPv4 `
-        -Dhcp Enabled `
-        -ErrorAction SilentlyContinue
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*"
+        } |
+        Select-Object -First 1
 
-    # Configure the AD DNS server.
+    if (-not $currentIPv4) {
+
+        Write-Warn "No usable IPv4 address detected. Repairing DHCP..."
+
+        Set-NetIPInterface `
+            -InterfaceIndex $adapter.ifIndex `
+            -AddressFamily IPv4 `
+            -Dhcp Enabled `
+            -ErrorAction Stop
+
+        ipconfig /renew | Out-Host
+        Start-Sleep -Seconds 5
+
+        $currentIPv4 = Get-NetIPAddress `
+            -InterfaceIndex $adapter.ifIndex `
+            -AddressFamily IPv4 `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*"
+            } |
+            Select-Object -First 1
+    }
+
+    if (-not $currentIPv4) {
+        throw "No valid DHCP IPv4 address is available. The VM network/DHCP must be fixed before deployment."
+    }
+
+    Write-Success "Usable IPv4 address: $($currentIPv4.IPAddress)"
+
+    # Configure AD DNS without changing the valid IP lease.
     Set-DnsClientServerAddress `
         -InterfaceIndex $adapter.ifIndex `
         -ServerAddresses $DCIP `
         -ErrorAction Stop
 
-    Write-Success "IPv4 remains DHCP."
     Write-Success "DNS is configured to $DCIP."
 
 }
 catch {
 
-    Write-Fail "Could not configure DNS."
+    Write-Fail "Could not configure the network/DNS."
 
     Write-Host ""
     Write-Host "Error:"
@@ -319,50 +353,62 @@ foreach ($port in $requiredPorts) {
 }
 
 # ============================================================
-# STEP 8 - DNS DOMAIN RESOLUTION
+# STEP 8 - ACTIVE DIRECTORY DNS + DC LOCATOR
 # ============================================================
 
-Write-Step "STEP 8 - Testing Active Directory DNS"
+Write-Step "STEP 8 - Testing Active Directory DNS and DC discovery"
 
 try {
 
     Clear-DnsClientCache -ErrorAction SilentlyContinue
 
-    $domainDNS = Resolve-DnsName `
-        -Name $DomainName `
+    $srvName = "_ldap._tcp.dc._msdcs.$DomainName"
+
+    $srvRecords = Resolve-DnsName `
+        -Name $srvName `
+        -Type SRV `
         -Server $DCIP `
         -ErrorAction Stop
 
-    Write-Success "$DomainName resolves successfully."
+    Write-Success "Active Directory LDAP SRV record resolves successfully."
 
-    $domainDNS |
-        Select-Object Name, Type, IPAddress |
+    $srvRecords |
+        Where-Object { $_.Type -eq "SRV" } |
+        Select-Object NameTarget, Port, Priority, Weight |
         Format-Table -AutoSize
 
 }
 catch {
 
-    Write-Fail "The domain cannot be resolved."
-
-    Write-Host ""
-    Write-Host "Domain : $DomainName"
-    Write-Host "DNS    : $DCIP"
-    Write-Host ""
-
-    Write-Host "Try this manually:"
-    Write-Host "    nslookup $DomainName"
-
-    Write-Host ""
-    Write-Host "The domain join cannot continue until AD DNS works."
-
+    Write-Fail "Active Directory DNS SRV lookup failed."
+    Write-Host "Expected record: _ldap._tcp.dc._msdcs.$DomainName"
+    Write-Host "DNS server     : $DCIP"
+    Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }
+
+Write-Host ""
+Write-Host "Running Domain Controller Locator..." -ForegroundColor Yellow
+
+$nltestOutput = & nltest.exe "/dsgetdc:$DomainName" 2>&1
+$nltestExit = $LASTEXITCODE
+$nltestOutput | Out-Host
+
+if ($nltestExit -ne 0) {
+    Write-Fail "Domain Controller Locator failed."
+    Write-Host "The domain join will not be attempted until AD discovery works."
+    exit 1
+}
+
+Write-Success "Domain Controller discovery succeeded."
 
 # ============================================================
 # STEP 9 - CHECK CURRENT DOMAIN STATUS
 # ============================================================
 
 Write-Step "STEP 9 - Checking current domain membership"
+
+$script:DomainJoinPendingRestart = $false
 
 $computerSystem = Get-CimInstance Win32_ComputerSystem
 
@@ -407,24 +453,19 @@ else {
 
         Write-Host "Attempting domain join..." -ForegroundColor Yellow
 
-       Add-Computer `
-    -DomainName $DomainName `
-    -Credential $credential `
-    -Force `
-    -ErrorAction Stop
+        Add-Computer `
+            -DomainName $DomainName `
+            -Credential $credential `
+            -Force `
+            -ErrorAction Stop
 
-        Write-Success "Domain join completed successfully."
+        Write-Success "Domain join request completed successfully."
 
         Write-Host ""
-        Write-Host "The computer MUST restart to complete the domain join." -ForegroundColor Yellow
+        Write-Warn "A restart is required to finalize domain membership."
+        Write-Warn "The script will NOT restart here; it will first configure the remaining ASPER lab components."
 
-        Start-Sleep -Seconds 3
-
-        Write-Host "Restarting computer..." -ForegroundColor Yellow
-
-        Restart-Computer -Force
-
-        exit
+        $script:DomainJoinPendingRestart = $true
 
     }
     catch {
@@ -1000,6 +1041,10 @@ Write-Host "Computer Name : $($computerSystem.Name)"
 Write-Host "Domain        : $($computerSystem.Domain)"
 Write-Host "Part Of Domain: $($computerSystem.PartOfDomain)"
 
+if ($script:DomainJoinPendingRestart) {
+    Write-Warn "Domain join is pending restart. PartOfDomain becomes True after reboot."
+}
+
 Write-Host ""
 Write-Host "===== SMB =====" -ForegroundColor White
 
@@ -1121,19 +1166,14 @@ Write-Host ""
 Write-Host "Deployment finished successfully." -ForegroundColor Green
 Write-Host ""
 
-$restart = Read-Host "Restart now? (Y/N)"
+Write-Host ""
+Write-Warn "IMPORTANT: This script will NOT restart the VM automatically."
+Write-Warn "Your Hyper-V VM previously booted Windows Setup from attached installation media."
+Write-Warn "Complete the restart only when the VM owner/admin confirms it will boot from the installed system disk."
+Write-Host ""
+Write-Host "When a safe restart is available, restart Windows normally to finalize:"
+Write-Host "  - Domain membership"
+Write-Host "  - SMBv1 feature state (if Windows requires a reboot)"
+Write-Host ""
+Write-Success "All pre-reboot ASPER configuration steps are complete."
 
-if ($restart -match "^[Yy]$") {
-
-    Write-Host ""
-    Write-Host "Restarting computer..." -ForegroundColor Yellow
-
-    Start-Sleep -Seconds 5
-
-    Restart-Computer -Force
-}
-else {
-
-    Write-Host ""
-    Write-Host "Restart skipped."
-} ukw give me the ful correct code everything shld be correct fix everything
